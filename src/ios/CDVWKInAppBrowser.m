@@ -64,6 +64,12 @@ static CDVWKInAppBrowser* instance = nil;
     _waitForBeforeload = NO;
 }
 
+
+- (id)settingForKey:(NSString*)key
+{
+    return [self.commandDelegate.settings objectForKey:[key lowercaseString]];
+}
+
 - (void)onReset
 {
     [self close:nil];
@@ -492,6 +498,21 @@ static CDVWKInAppBrowser* instance = nil;
     return NO;
 }
 
+- (BOOL)isAllowedScheme:(NSString*)scheme
+{
+    NSString* allowedSchemesPreference = [self settingForKey:@"AllowedSchemes"];
+    if (allowedSchemesPreference == nil || [allowedSchemesPreference isEqualToString:@""]) {
+        // Preference missing.
+        return NO;
+    }
+    for (NSString* allowedScheme in [allowedSchemesPreference componentsSeparatedByString:@","]) {
+        if ([allowedScheme isEqualToString:scheme]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 /**
  * The message handler bridge provided for the InAppBrowser is capable of executing any oustanding callback belonging
  * to the InAppBrowser plugin. Care has been taken that other callbacks cannot be triggered, and that no
@@ -539,9 +560,21 @@ static CDVWKInAppBrowser* instance = nil;
         [self.commandDelegate sendPluginResult:pluginResult callbackId:self.callbackId];
     }
     
-    //if is an app store, tel, sms, mailto or geo link, let the system handle it, otherwise it fails to load it
-    NSArray * allowedSchemes = @[@"itms-appss", @"itms-apps", @"tel", @"sms", @"mailto", @"geo"];
-    if ([allowedSchemes containsObject:[url scheme]]) {
+    
+    //test for whitelisted custom scheme names like mycoolapp:// or twitteroauthresponse:// (Twitter Oauth Response)
+        else if (![[ url scheme] isEqualToString:@"http"] && ![[ url scheme] isEqualToString:@"https"] && [self isAllowedScheme:[url scheme]]) {
+            // Send a customscheme event.
+            CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
+                                                          messageAsDictionary:@{@"type":@"customscheme", @"url":[url absoluteString]}];
+            [pluginResult setKeepCallback:[NSNumber numberWithBool:YES]];
+            [self.commandDelegate sendPluginResult:pluginResult callbackId:self.callbackId];
+            decisionHandler(WKNavigationActionPolicyCancel);
+            return;
+        }
+
+    
+    //if is an app store link, let the system handle it, otherwise it fails to load it
+    if ([[ url scheme] isEqualToString:@"itms-appss"] || [[ url scheme] isEqualToString:@"itms-apps"]) {
         [theWebView stopLoading];
         [self openInSystem:url];
         shouldStart = NO;
